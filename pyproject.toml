@@ -1,0 +1,17 @@
+[project]
+name = "seamless-texture"
+version = "0.1.0"
+description = "seamless-texture"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.5.0",
+    "pillow>=12.2.0",
+    "scipy>=1.18.0",
+]
+
+[project.optional-dependencies]
+notebook = [
+    "ipykernel>=7.3.0",
+    "matplotlib>=3.11.0",
+]
