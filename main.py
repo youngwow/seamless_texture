@@ -277,16 +277,42 @@ def _heal_seam(
         y0: int,
         wt: int,
         ht: int,
-        m: int
+        m: int,
+        mirror: bool = False
 ) -> np.ndarray:
     """Crop `wt x ht` and heal both wrap seams, per axis adaptively.
 
-    Each axis is healed with a min-cut boundary when its seam does not sit on a
-    continuous joint (staggered plank-ends), otherwise with the plain cosine
-    feather. When both axes feather, this is byte-identical to `_wrap_blend`
-    (grids / grooves / `main` are untouched). x is handled before y so the 2-D
-    corner is resolved sequentially, exactly as `_wrap_blend` does.
+    A continuous-joint axis is always healed with the plain cosine feather. A
+    no-continuous-joint axis (staggered plank-ends) is healed with a min-cut
+    boundary (default) or, when `mirror=True`, by **reflect-tiling** that axis
+    (`vstack(C, flipud(C))` / `hstack(C, fliplr(C))`): a board reaching the edge
+    reflects back instead of being cut, so the tile is seamless by reflection with
+    no truncated boards (it doubles that axis). When both axes feather, this is
+    byte-identical to `_wrap_blend` (grids / grooves / `main` are untouched). x is
+    handled before y so the 2-D corner is resolved sequentially.
     """
+    if mirror:
+        use_x = _axis_decision(arr, x0, y0, wt, ht, axis=1)[0]
+        use_y = _axis_decision(arr, x0, y0, wt, ht, axis=0)[0]
+        if not use_x and not use_y:
+            return _wrap_blend(arr, x0, y0, wt, ht, m)
+        mx = 0 if use_x else m
+        my = 0 if use_y else m
+        src = arr[y0:y0 + ht + my, x0:x0 + wt + mx].astype(np.float64)
+        if not use_x:                                   # feather the jointed x-seam
+            wx = _cosine_ramp(m)[None, :, None]
+            src[:, :m] = src[:, :m] * wx + src[:, wt:wt + m] * (1.0 - wx)
+        out = src[:, :wt].copy()
+        if not use_y:                                   # feather the jointed y-seam
+            wy = _cosine_ramp(m)[:, None, None]
+            out[:m] = out[:m] * wy + out[ht:ht + m] * (1.0 - wy)
+        tile = np.clip(out[:ht], 0, 255).astype(np.uint8)
+        if use_x:                                       # reflect the no-joint x-axis
+            tile = np.concatenate([tile, tile[:, ::-1]], axis=1)
+        if use_y:                                       # reflect the no-joint y-axis
+            tile = np.concatenate([tile, tile[::-1, :]], axis=0)
+        return tile
+
     use_y, ovy_w, path_y = _axis_decision(arr, x0, y0, wt, ht, axis=0)
     ovy = ovy_w if use_y else m
     # x is healed across the full (ht + ovy) height, so evaluate its cut there.
@@ -621,7 +647,7 @@ def make_seamless_joints(
     m = max(4, min(m, w - x0 - wt, h - y0 - ht))
     used = {"x": "joints" if sx else "period",
             "y": "joints" if sy else "period"}
-    return _heal_seam(arr, x0, y0, wt, ht, m), used
+    return _heal_seam(arr, x0, y0, wt, ht, m, mirror=True), used
 
 
 def tile_image(arr: np.ndarray, nx: int, ny: int) -> np.ndarray:
